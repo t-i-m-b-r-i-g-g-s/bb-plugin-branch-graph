@@ -58,6 +58,33 @@ test('origin is explicit live evidence, never replaced by stale remote-tracking 
   } finally { await harness.experimental_dispose(); f.dispose(); remote.dispose(); }
 });
 
+test('inspection resolves selected checkout HEAD while explicit branches remain repository-scoped', async () => {
+  const f = fixture(), harness = experimental_createHostEntryHarness(host);
+  try {
+    const path = join(f.root, 'detached');
+    f.git('worktree', 'add', '--detach', path);
+    const commit = (cwd, subject, date) => execFileSync('git', ['-C', cwd, 'commit', '--allow-empty', '-m', subject], {
+      env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const rootDate = '2025-01-01T12:00:00+00:00', detachedDate = '2025-02-01T12:00:00+00:00';
+    commit(f.root, 'ROOT_ONLY_COMMIT', rootDate);
+    commit(path, 'DETACHED_ONLY_COMMIT', detachedDate);
+    const cases = [
+      [{ root: f.root, path: f.root }, 'ROOT_ONLY_COMMIT', rootDate],
+      [{ root: f.root, path: f.root, branch: 'main' }, 'ROOT_ONLY_COMMIT', rootDate],
+      [{ root: path, branch: 'main' }, 'ROOT_ONLY_COMMIT', rootDate],
+      [{ root: f.root, path }, 'DETACHED_ONLY_COMMIT', detachedDate],
+    ];
+    for (const [input, subject, date] of cases) {
+      const result = await harness.experimental_call('inspect', input);
+      assert.equal(result.error, null);
+      assert.equal(result.lastCommitSubject, subject);
+      assert.equal(Date.parse(result.lastCommitAt), Date.parse(date));
+    }
+  } finally { await harness.experimental_dispose(); f.dispose(); }
+});
+
 test('NUL-delimited inventory preserves unusual paths and detached inspection rejects a forged branch', async () => {
   const f = fixture(), harness = experimental_createHostEntryHarness(host);
   try {

@@ -57,7 +57,8 @@ export function inspectCheckout(root: string, path?: string, branch?: string): G
     const upstream = branch ? run(root, 'for-each-ref', '--format=%(upstream:short)', ref).trim() || null : null;
     let ahead: number | null = null, behind: number | null = null;
     if (upstream) { try { const counts = run(root, 'rev-list', '--left-right', '--count', `${ref}...${upstream}`).trim().split(/\s+/).map(Number); [ahead, behind] = counts; } catch { /* upstream not locally available */ } }
-    const [lastCommitAt, lastCommitSubject] = run(root, 'log', '-1', '--format=%cI%x00%s', ref).trim().split('\0');
+    // HEAD is checkout-local; explicit branch refs remain repository-scoped.
+    const [lastCommitAt, lastCommitSubject] = run(branch ? root : cwd, 'log', '-1', '--format=%cI%x00%s', ref).trim().split('\0');
     let mergedIntoMain: boolean | null = null;
     if (branch && names.includes('main')) {
       try { execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', ref, 'refs/heads/main'], { timeout: 10_000, stdio: 'ignore' }); mergedIntoMain = true; }
