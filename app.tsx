@@ -3,6 +3,9 @@ import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent }
 import { definePluginApp, useRpc } from '@get-bb/plugin-sdk/app';
 import type { rpcContract, GraphProject, GraphTree, GraphThread, GraphInspection } from './contract';
 import './graph.css';
+import './audit.css';
+import { AuditPanel } from './audit-panel';
+import { sourceKey } from './graph';
 
 type Snapshot = { projects: GraphProject[]; unplacedThreads: GraphThread[]; generatedAt: string };
 type NodeKind = 'repo' | 'branch' | 'tree' | 'thread' | 'workspace';
@@ -16,7 +19,7 @@ type FocusMode = 'all' | 'threads' | 'review' | 'branch-only';
 const NODE_H = 66;
 const X = { repo: 50, branch: 390, tree: 730, thread: 1070 };
 const WIDTH = { repo: 272, branch: 268, tree: 285, thread: 275 };
-const projectKey = (p: GraphProject) => p.id + ':' + p.root;
+const projectKey = sourceKey;
 const shortPath = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 const threadFlag = (thread: GraphThread): Node['flag'] => thread.archivedAt ? 'archived' : thread.status === 'active' ? 'active' : undefined;
 const threadSubtitle = (thread: GraphThread) => `${thread.archivedAt ? 'archived' : thread.status} · ${thread.id}`;
@@ -77,6 +80,7 @@ export function makeLayout(projects: GraphProject[], unplacedThreads: GraphThrea
 function GraphPage() {
   const rpc = useRpc<typeof rpcContract>();
   const [data, setData] = useState<Snapshot | null>(null);
+  const [page, setPage] = useState<'graph' | 'audit'>('graph');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -101,7 +105,7 @@ function GraphPage() {
     setEvidence({ id, loading: true });
     rpc.call('graph_inspect', target).then(value => { if (!cancelled) setEvidence({ id, loading: false, value }); }, cause => { if (!cancelled) setEvidence({ id, loading: false, error: cause instanceof Error ? cause.message : String(cause) }); });
     return () => { cancelled = true; };
-  }, [selectedId, selected?.id, rpc]);
+  }, [selected, rpc]);
   const highlighted = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q && mode === 'all') return null;
@@ -136,6 +140,8 @@ function GraphPage() {
   const counts = data ? { projects: data.projects.length, trees: data.projects.reduce((n,p)=>n+p.trees.length,0), branches: data.projects.reduce((n,p)=>n+p.branches.length,0), threads: data.projects.reduce((n,p)=>n+p.threads.length,0) + data.unplacedThreads.length, review: data.projects.reduce((n,p)=>n+p.branches.length+p.trees.filter(t=>t.kind==='detached'||t.kind==='prunable').length,0) } : null;
   return <div className="bgx-page">
     <header className="bgx-toolbar"><div className="bgx-heading"><span className="bgx-logo">⑂</span><div><strong>Branch Graph</strong><small>Repository → branch → worktree → BB thread</small></div></div><div className="bgx-search"><span>⌕</span><input aria-label="Search graph" placeholder="Highlight branch, worktree, thread…" value={query} onChange={event=>setQuery(event.target.value)} />{query && <button aria-label="Clear search" onClick={()=>setQuery('')}>×</button>}</div><button className="bgx-action" onClick={refresh} disabled={busy}>{busy ? 'Scanning…' : '↻ Refresh'}</button></header>
+    <nav className="bgx-focus" aria-label="Branch Graph views"><button aria-pressed={page === 'graph'} onClick={() => setPage('graph')}>Graph</button><button aria-pressed={page === 'audit'} onClick={() => setPage('audit')}>Audit</button><small>Git read-only · Review threads require explicit closure confirmation</small></nav>
+    <div className="bgx-graph-view" style={{ display: page === 'graph' ? 'contents' : 'none' }}>
     <nav className="bgx-jumps" aria-label="Jump to graph section"><span>SECTIONS</span>{layout.sections.map(section=><button key={section.id} onClick={()=>focus(section)}>{section.title}<small>{section.id==='no-git-checkout' ? data?.unplacedThreads.length : section.trees}</small></button>)}<span className="bgx-jumps-note">All nodes remain on the canvas</span></nav>
     <div className="bgx-focus" role="group" aria-label="Highlight graph nodes"><span>FOCUS</span>{([['all','All'],['threads','Threads'],['review','Review signals'],['branch-only','Branch-only']] as const).map(([value,label])=><button key={value} aria-pressed={mode===value} onClick={()=>setMode(value)}>{label}{value==='review' && counts ? ` · ${counts.review}` : ''}</button>)}<small>Focus dims nodes; it never removes them.</small></div>
     {error && <div role="alert" className="bgx-error">{error}</div>}
@@ -150,7 +156,10 @@ function GraphPage() {
       <div className="bgx-legend"><div><i className="bgx-swatch bgx-repo" /> Repository <i className="bgx-swatch bgx-branch" /> Branch <i className="bgx-swatch bgx-tree" /> Worktree <i className="bgx-swatch bgx-thread" /> BB thread <i className="bgx-swatch bgx-workspace" /> No Git checkout</div><small>Solid lines: checkout / thread association. Dashed lines: non-Git grouping. Not Git ancestry. Drag to pan · scroll to pan · ⌘/Ctrl+scroll to zoom.</small></div>
       <div className="bgx-zoom"><button onClick={()=>zoomAt(1.25)} aria-label="Zoom in">+</button><span>{Math.round(view.scale*100)}%</span><button onClick={()=>zoomAt(.8)} aria-label="Zoom out">−</button><button onClick={fitAll} aria-label="Fit whole graph" title="Fit whole graph">◇</button></div>
     </div>
-    <div className="bgx-status">{counts ? `${counts.projects} repositories · ${counts.trees} worktrees · ${counts.branches} branch-only · ${counts.threads} BB threads (${data?.unplacedThreads.length} without Git checkout)` : 'Loading graph'}{highlighted && ` · ${highlighted.size} highlighted nodes`}<span>{data ? `Snapshot ${new Date(data.generatedAt).toLocaleString()} · Read only · Local branches only` : ''}</span></div>
+    </div>
+    {page === 'audit' && (data ? <AuditPanel key={data.generatedAt} data={data} onOrigin={target => rpc.call('graph_origin', target)} onInspect={target => rpc.call('graph_inspect', target)} onReview={target => rpc.call('graph_closure_review', target)} /> : <p>Loading audit…</p>)}
+    {page === 'audit' && error && <div role="alert" className="bgx-error">{error}</div>}
+    <div className="bgx-status">{counts ? `${counts.projects} registered sources · ${counts.trees} worktrees · ${counts.branches} branch-only · ${counts.threads} BB threads (${data?.unplacedThreads.length} without Git checkout)` : 'Loading graph'}{highlighted && ` · ${highlighted.size} highlighted nodes`}<span>{data ? `Snapshot ${new Date(data.generatedAt).toLocaleString()} · Git read only · Host-scoped` : ''}</span></div>
   </div>;
 }
 export default definePluginApp(app => { app.slots.navPanel({ id: 'branch-graph', title: 'Branch Graph', icon: 'GitBranch', path: 'graph', component: GraphPage }); });
