@@ -2,6 +2,14 @@
 
 A read-only BB navigation page for registered Git project sources, local branches, worktrees, and BB threads. The plugin does **not** switch, prune, remove, or create Git data.
 
+## Install
+
+```sh
+bb plugin install git:https://github.com/t-i-m-b-r-i-g-g-s/bb-plugin-branch-graph.git@^0.1.0
+```
+
+BB will show the resolved source and ask for confirmation before running third-party plugin code. The optional GitHub PR lookup requires `gh` and GitHub authentication; the graph itself does not. See [LICENSE](LICENSE) for the MIT license.
+
 ## What the graph means
 
 - Solid connections show repository → local branch → checked-out worktree → BB thread whose registered environment path matches that worktree.
